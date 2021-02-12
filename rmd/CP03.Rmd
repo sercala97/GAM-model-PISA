@@ -1,0 +1,251 @@
+---
+title: "CP PISA"
+author: "Sergio Cañón"
+date: "7/11/2020"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Librerías
+
+```{r }
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(ISLR)
+library(boot)
+library(splines)
+library(ggplot2)
+library(skimr)
+library(car)
+library(ggcorrplot)
+library(gam)
+library(rcompanion)
+
+
+```
+
+## Importación y limpieza
+
+```{r, echo = TRUE  }
+pisa <- read.csv("pisasci2006.csv")
+
+skim_pisa <- skim(pisa)
+
+pisa <- drop_na(pisa)
+
+duplicated(pisa$Overall)
+
+pisa$Country <- NULL 
+pisa$Issues <- NULL
+pisa$Evidence <- NULL
+pisa$Explain <- NULL
+pisa$Issues <- NULL
+```
+
+## Análisis exploratorio
+
+You can also embed plots, for example:
+
+```{r echo = FALSE}
+
+pisa %>% 
+  gather(-Overall, key = "var", value = "value") %>%
+  ggplot(aes(x=Overall, y= value)) +
+  geom_jitter() +
+  geom_smooth(method = "loess")+
+  facet_wrap(~ var, scales = "free")+
+  theme_minimal()
+
+
+```
+
+```{r}
+
+
+ggcorrplot(cor(pisa),
+           type = "upper",
+           lab = T, 
+           tl.cex = 12,
+           lab_size = 5)
+```
+
+## Modelo GAM
+
+### Train y el test set
+
+```{r}
+train <- sample(nrow(pisa), 0.7*nrow(pisa))
+pisa_train<- pisa[train,]
+pisa_test <- pisa[-train,] 
+
+```
+
+### Degrees of freedom y knots
+
+```{r}
+gl_income <- smooth.spline(pisa$Income, pisa$Overall)
+
+gl_interest <- smooth.spline(pisa$Interest, pisa$Overall) 
+
+gl_support <- smooth.spline(pisa$Support, pisa$Overall)
+
+gl_health <- smooth.spline(pisa$Health, pisa$Overall)
+
+gl_edu <- smooth.spline(pisa$Edu, pisa$Overall)
+
+gl_hdi <- smooth.spline(pisa$HDI, pisa$Overall)
+
+```
+
+```{r knots}
+attr(bs(pisa$Income ,df=8) ,"knots")
+
+attr(bs(pisa$Interest ,df=5.509791 ),"knots")
+
+attr(bs(pisa$Edu ,df=4.227543) ,"knots")
+
+```
+
+### Modelo "gam1"
+
+```{r}
+gam1 <- gam::gam(Overall~  
+            s(Income)+
+              s(Interest, df= 5.509791) + 
+              s(Support, df= 5)+
+              s(Health, df= 5) +
+              s(HDI, df= 3)+
+              s(Edu,df=3) 
+            , data = pisa_train)
+
+pred_gam1 <- predict(gam1, pisa_test)
+error_gam1 <- sqrt(mean((pred_gam1 - pisa_test$Overall)^2))
+error_gam1
+```
+
+```{r}
+par(mfrow= c(2,3))
+ plot(gam1,se = TRUE, col = "green",residuals=TRUE)
+```
+
+### Modelo "gam\_spar"
+
+```{r}
+gam_spar <- gam(Overall~
+
+              s(x= Interest, spar = 0.8763807 ,df = 5.5)+
+              s(Support, df= 2, spar = 1.49996)+
+              s(Health, df= 2, spar = 1.499966  ) +
+              s(HDI, df= 2, spar = 1.499965  )+
+              s(Edu,df= 4.227543, spar = 1.36) 
+              , data = pisa_train)
+  
+pred_gam_spar<- predict(gam_spar, pisa_test)
+error_gam_spar <- sqrt(mean((pred_gam_spar - pisa_test$Overall)^2))
+error_gam_spar
+
+
+```
+
+```{r}
+par(mfrow= c(2,3))
+ plot(gam_spar,se = TRUE, col = "blue",residuals=TRUE)
+```
+
+### Modelo "gam2"
+
+```{r}
+gam2 <- gam(Overall~  
+              s(Income)+
+              s(Interest) + 
+              s(Support)+
+              s(Health) +
+              s(HDI)+
+              s(Edu ) 
+            , data = pisa_train)
+pred_gam2 <- predict(gam2, pisa_test)
+error_gam2 <- sqrt(mean((pred_gam2 - pisa_test$Overall)^2))
+error_gam2
+
+```
+
+```{r}
+par(mfrow= c(2,3))
+plot(gam2,se = TRUE, col = "black",residuals=TRUE)
+```
+
+### Modelo "gamns"
+
+```{r}
+gamns <- mgcv::gam(Overall~  
+              ns(Income)+
+              ns(Interest) + 
+              ns(Support)+
+              ns(Edu)+
+              ns(HDI)
+              
+            , data = pisa_train)
+pred_gamns <- predict(gamns, pisa_test)
+error_gamns <- sqrt(mean((pred_gamns - pisa_test$Overall)^2))
+error_gamns
+```
+
+### Modelo "gambs"
+
+```{r}
+gambs <- mgcv::gam(Overall~ 
+              bs(Income)+
+              bs(Interest) + 
+              bs(Edu)+
+              bs(Support)+
+                bs(HDI)
+               , data = pisa_train)
+              
+pred_gambs <- predict(gambs, pisa_test)
+error_gambs <- sqrt(mean((pred_gambs - pisa_test$Overall)^2))
+error_gambs
+
+```
+
+### Modelo lineal "lm"
+
+```{r}
+
+lm  <- lm(Overall ~ .
+                        ,data=pisa_train)
+pred_lm <- predict(lm, pisa_test)
+error_lm <- sqrt(mean((pred_lm - pisa_test$Overall)^2))
+error_lm
+```
+
+### Modelo polinomio
+
+```{r}
+glm_polinomio <- glm(Overall ~ 
+                       poly(Interest, 5) +
+                       poly(Support, 1) +
+                       poly(Income, 1)+
+                       poly(Health, 1)+
+                       poly(Edu, 4)+
+                       poly(HDI, 1)
+                     , data = pisa_train )
+pred_poli <- predict(glm_polinomio, pisa_test)
+error_poli <- sqrt(mean((pred_poli - pisa_test$Overall)^2))
+error_poli
+```
+
+## Comparación de modelos
+
+anova
+
+```{r}
+compareGLM(gamns, gam2, gam_spar, gam1, glm_polinomio)
+
+```
